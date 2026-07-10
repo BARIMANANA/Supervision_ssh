@@ -1,12 +1,19 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import customtkinter as ctk
 import socket
 import threading
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
 import json
 import datetime
 import sys
 import os
+from tkinter import messagebox, ttk
 from database import DatabaseManager
+
+# Configuration du thème
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 class SSHServer:
     def __init__(self, host='0.0.0.0', port=2222):
@@ -68,7 +75,6 @@ class SSHServer:
                     command = data.decode().strip()
                     if command.lower() in ['quit', 'exit', 'bye']:
                         break
-                    print(f"📥 Commande brute: {command}")
                 except:
                     break
             except:
@@ -119,212 +125,512 @@ class SSHServer:
                 pass
         self.db.close()
 
-class ServerGUI:
+class ImprovedServerGUI:
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("🔐 Supervision SSH - Serveur Central")
-        self.root.geometry("1200x700")
-        self.root.configure(bg='#f0f0f0')
+        self.window = ctk.CTk()
+        self.window.title("🔐 Supervision SSH - Serveur Central")
+        self.window.geometry("1300x750")
+        self.window.minsize(1100, 650)
+        
+        # Configuration du grid
+        self.window.grid_columnconfigure(0, weight=1)
+        self.window.grid_rowconfigure(0, weight=1)
         
         self.server = SSHServer()
         self.server_thread = None
+        self.command_history = []
         
         self.setup_ui()
         self.update_status()
         
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def setup_ui(self):
-        # Style
-        style = ttk.Style()
-        style.configure('Header.TLabel', font=('Arial', 12, 'bold'))
+        # Frame principal
+        self.main_frame = ctk.CTkFrame(self.window, corner_radius=15)
+        self.main_frame.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(0, weight=0)  # Header
+        self.main_frame.grid_rowconfigure(1, weight=1)  # Content
         
-        # Menu
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        # ===== HEADER =====
+        self.header_frame = ctk.CTkFrame(self.main_frame, corner_radius=10, fg_color="transparent")
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        self.header_frame.grid_columnconfigure(0, weight=0)
+        self.header_frame.grid_columnconfigure(1, weight=1)
+        self.header_frame.grid_columnconfigure(2, weight=0)
+        self.header_frame.grid_columnconfigure(3, weight=0)
+        self.header_frame.grid_columnconfigure(4, weight=0)
+        self.header_frame.grid_columnconfigure(5, weight=0)
         
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Fichier", menu=file_menu)
-        file_menu.add_command(label="▶ Démarrer le serveur", command=self.start_server)
-        file_menu.add_command(label="⏹ Arrêter le serveur", command=self.stop_server)
-        file_menu.add_separator()
-        file_menu.add_command(label="Quitter", command=self.on_closing)
+        # Logo et titre
+        title_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        title_frame.grid(row=0, column=0, padx=(5, 20), pady=5)
         
-        # Panneau principal
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        ctk.CTkLabel(
+            title_frame,
+            text="🔐",
+            font=ctk.CTkFont(size=32)
+        ).pack(side="left")
         
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(0, weight=0)
-        main_frame.rowconfigure(1, weight=1)
-        
-        # 1. Section contrôle
-        control_frame = ttk.LabelFrame(main_frame, text="Contrôle du Serveur", padding="10")
-        control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        control_frame.columnconfigure(0, weight=1)
-        control_frame.columnconfigure(1, weight=1)
-        control_frame.columnconfigure(2, weight=1)
-        control_frame.columnconfigure(3, weight=1)
+        ctk.CTkLabel(
+            title_frame,
+            text="Supervision SSH",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color="#4CAF50"
+        ).pack(side="left", padx=(10, 0))
         
         # Statut
-        self.status_label = ttk.Label(control_frame, text="⛔ Statut: Arrêté", foreground="red", font=('Arial', 10, 'bold'))
-        self.status_label.grid(row=0, column=0, sticky=tk.W, padx=5)
+        status_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        status_frame.grid(row=0, column=1, padx=10)
         
-        # Boutons
-        self.start_btn = ttk.Button(control_frame, text="▶ Démarrer", command=self.start_server, width=15)
-        self.start_btn.grid(row=0, column=1, padx=5)
+        self.status_indicator = ctk.CTkLabel(
+            status_frame,
+            text="⛔",
+            font=ctk.CTkFont(size=18)
+        )
+        self.status_indicator.pack(side="left", padx=5)
         
-        self.stop_btn = ttk.Button(control_frame, text="⏹ Arrêter", command=self.stop_server, state=tk.DISABLED, width=15)
-        self.stop_btn.grid(row=0, column=2, padx=5)
+        self.status_label = ctk.CTkLabel(
+            status_frame,
+            text="Arrêté",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="red"
+        )
+        self.status_label.pack(side="left", padx=5)
         
-        self.clients_label = ttk.Label(control_frame, text="🖥️ Clients connectés: 0", font=('Arial', 10))
-        self.clients_label.grid(row=0, column=3, sticky=tk.E, padx=5)
+        # Clients connectés
+        clients_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        clients_frame.grid(row=0, column=2, padx=20)
         
-        # 2. Onglets
-        self.notebook = ttk.Notebook(main_frame)
-        self.notebook.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        ctk.CTkLabel(
+            clients_frame,
+            text="🖥️",
+            font=ctk.CTkFont(size=18)
+        ).pack(side="left", padx=5)
         
-        # Onglet Sessions actives
-        self.sessions_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.sessions_frame, text="🟢 Sessions Actives")
+        self.clients_label = ctk.CTkLabel(
+            clients_frame,
+            text="0 clients",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#4CAF50"
+        )
+        self.clients_label.pack(side="left", padx=5)
+        
+        # Boutons de contrôle
+        self.start_btn = ctk.CTkButton(
+            self.header_frame,
+            text="▶ Démarrer",
+            command=self.start_server,
+            width=120,
+            height=38,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2E7D32",
+            hover_color="#1B5E20"
+        )
+        self.start_btn.grid(row=0, column=3, padx=5, pady=5)
+        
+        self.stop_btn = ctk.CTkButton(
+            self.header_frame,
+            text="⏹ Arrêter",
+            command=self.stop_server,
+            width=120,
+            height=38,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#C62828",
+            hover_color="#B71C1C",
+            state="disabled"
+        )
+        self.stop_btn.grid(row=0, column=4, padx=5, pady=5)
+        
+        # Rafraîchir
+        self.refresh_btn = ctk.CTkButton(
+            self.header_frame,
+            text="🔄",
+            command=self.refresh_all,
+            width=40,
+            height=38,
+            font=ctk.CTkFont(size=16),
+            fg_color="#1565C0",
+            hover_color="#0D47A1"
+        )
+        self.refresh_btn.grid(row=0, column=5, padx=5, pady=5)
+        
+        # ===== CONTENU =====
+        self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=10)
+        self.content_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.content_frame.grid_columnconfigure(0, weight=1)
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        
+        # Onglets
+        self.tab_view = ctk.CTkTabview(self.content_frame, width=1200, height=500)
+        self.tab_view.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # Onglet 1: Sessions Actives
+        self.tab_view.add("🟢 Sessions Actives")
         self.setup_sessions_tab()
         
-        # Onglet Historique
-        self.history_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.history_frame, text="📋 Historique")
+        # Onglet 2: Historique
+        self.tab_view.add("📋 Historique")
         self.setup_history_tab()
         
-        # Onglet Commandes
-        self.commands_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.commands_frame, text="📝 Commandes")
+        # Onglet 3: Commandes
+        self.tab_view.add("📝 Commandes")
         self.setup_commands_tab()
         
-        # Onglet Console
-        self.console_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.console_frame, text="💻 Console")
+        # Onglet 4: Console
+        self.tab_view.add("💻 Console")
         self.setup_console_tab()
+        
+        # Onglet 5: Statistiques
+        self.tab_view.add("📊 Statistiques")
+        self.setup_stats_tab()
     
     def setup_sessions_tab(self):
-        self.sessions_frame.columnconfigure(0, weight=1)
-        self.sessions_frame.rowconfigure(0, weight=1)
+        tab = self.tab_view.tab("🟢 Sessions Actives")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
         
+        # Frame avec bordure
+        frame = ctk.CTkFrame(tab, corner_radius=10)
+        frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+        
+        # Treeview
         columns = ("ID", "Host", "Port", "Username", "Début", "Statut")
-        self.sessions_tree = ttk.Treeview(self.sessions_frame, columns=columns, show="headings", height=15)
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Custom.Treeview",
+                       background="#2b2b2b",
+                       foreground="white",
+                       fieldbackground="#2b2b2b",
+                       rowheight=30)
+        style.map('Custom.Treeview',
+                  background=[('selected', '#4CAF50')])
+        
+        self.sessions_tree = ttk.Treeview(
+            frame,
+            columns=columns,
+            show="headings",
+            height=15,
+            style="Custom.Treeview"
+        )
         
         for col in columns:
             self.sessions_tree.heading(col, text=col)
-            self.sessions_tree.column(col, width=120)
+            self.sessions_tree.column(col, width=150)
         
-        scrollbar = ttk.Scrollbar(self.sessions_frame, orient=tk.VERTICAL, command=self.sessions_tree.yview)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.sessions_tree.yview)
         self.sessions_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.sessions_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.sessions_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         
-        btn_frame = ttk.Frame(self.sessions_frame)
-        btn_frame.grid(row=1, column=0, sticky=tk.W, pady=10)
-        ttk.Button(btn_frame, text="🔄 Rafraîchir", command=self.refresh_sessions).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="❌ Fermer session", command=self.close_session).pack(side=tk.LEFT, padx=5)
+        # Info en bas
+        info_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        info_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+        
+        self.sessions_count = ctk.CTkLabel(
+            info_frame,
+            text="Sessions actives: 0",
+            font=ctk.CTkFont(size=12),
+            text_color="gray70"
+        )
+        self.sessions_count.pack(side="left", padx=5)
     
     def setup_history_tab(self):
-        self.history_frame.columnconfigure(0, weight=1)
-        self.history_frame.rowconfigure(0, weight=1)
+        tab = self.tab_view.tab("📋 Historique")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+        
+        frame = ctk.CTkFrame(tab, corner_radius=10)
+        frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
         
         columns = ("ID", "Host", "Port", "Username", "Début", "Fin", "Statut")
-        self.history_tree = ttk.Treeview(self.history_frame, columns=columns, show="headings", height=15)
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Custom.Treeview",
+                       background="#2b2b2b",
+                       foreground="white",
+                       fieldbackground="#2b2b2b",
+                       rowheight=30)
+        style.map('Custom.Treeview',
+                  background=[('selected', '#1565C0')])
+        
+        self.history_tree = ttk.Treeview(
+            frame,
+            columns=columns,
+            show="headings",
+            height=15,
+            style="Custom.Treeview"
+        )
         
         for col in columns:
             self.history_tree.heading(col, text=col)
-            self.history_tree.column(col, width=120)
+            self.history_tree.column(col, width=150)
         
-        scrollbar = ttk.Scrollbar(self.history_frame, orient=tk.VERTICAL, command=self.history_tree.yview)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.history_tree.yview)
         self.history_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.history_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
-        btn_frame = ttk.Frame(self.history_frame)
-        btn_frame.grid(row=1, column=0, sticky=tk.W, pady=10)
-        ttk.Button(btn_frame, text="🔄 Rafraîchir", command=self.refresh_history).pack(side=tk.LEFT, padx=5)
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
     
     def setup_commands_tab(self):
-        self.commands_frame.columnconfigure(0, weight=1)
-        self.commands_frame.rowconfigure(0, weight=1)
+        tab = self.tab_view.tab("📝 Commandes")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
+        
+        frame = ctk.CTkFrame(tab, corner_radius=10)
+        frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
         
         columns = ("ID", "Session", "Commande", "Résultat", "Durée", "Heure")
-        self.commands_tree = ttk.Treeview(self.commands_frame, columns=columns, show="headings", height=15)
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Custom.Treeview",
+                       background="#2b2b2b",
+                       foreground="white",
+                       fieldbackground="#2b2b2b",
+                       rowheight=30)
+        style.map('Custom.Treeview',
+                  background=[('selected', '#E65100')])
+        
+        self.commands_tree = ttk.Treeview(
+            frame,
+            columns=columns,
+            show="headings",
+            height=15,
+            style="Custom.Treeview"
+        )
         
         for col in columns:
             self.commands_tree.heading(col, text=col)
             if col == "Résultat":
-                self.commands_tree.column(col, width=300)
+                self.commands_tree.column(col, width=400)
+            elif col == "Commande":
+                self.commands_tree.column(col, width=200)
             else:
                 self.commands_tree.column(col, width=120)
         
-        scrollbar = ttk.Scrollbar(self.commands_frame, orient=tk.VERTICAL, command=self.commands_tree.yview)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.commands_tree.yview)
         self.commands_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.commands_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
-        btn_frame = ttk.Frame(self.commands_frame)
-        btn_frame.grid(row=1, column=0, sticky=tk.W, pady=10)
-        ttk.Button(btn_frame, text="🔄 Rafraîchir", command=self.refresh_commands).pack(side=tk.LEFT, padx=5)
+        self.commands_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
     
     def setup_console_tab(self):
-        self.console_frame.columnconfigure(0, weight=1)
-        self.console_frame.rowconfigure(0, weight=0)
-        self.console_frame.rowconfigure(1, weight=1)
+        tab = self.tab_view.tab("💻 Console")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=0)
+        tab.grid_rowconfigure(1, weight=1)
         
-        # Zone de saisie
-        input_frame = ttk.Frame(self.console_frame)
-        input_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        input_frame.columnconfigure(0, weight=0)
-        input_frame.columnconfigure(1, weight=1)
-        input_frame.columnconfigure(2, weight=0)
-        input_frame.columnconfigure(3, weight=0)
+        # Zone de commande
+        cmd_frame = ctk.CTkFrame(tab, corner_radius=10)
+        cmd_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        cmd_frame.grid_columnconfigure(0, weight=0)
+        cmd_frame.grid_columnconfigure(1, weight=1)
+        cmd_frame.grid_columnconfigure(2, weight=0)
+        cmd_frame.grid_columnconfigure(3, weight=0)
+        cmd_frame.grid_columnconfigure(4, weight=0)
         
-        ttk.Label(input_frame, text="Commande SSH:", font=('Arial', 10)).grid(row=0, column=0, sticky=tk.W)
+        ctk.CTkLabel(
+            cmd_frame,
+            text="💻 Commande:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=0, column=0, padx=10, pady=10)
         
-        self.cmd_entry = ttk.Entry(input_frame, width=60, font=('Arial', 10))
-        self.cmd_entry.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
-        self.cmd_entry.bind('<Return>', lambda e: self.send_console_command())
-        
-        self.target_host = ttk.Combobox(input_frame, width=25)
-        self.target_host.grid(row=0, column=2, padx=5)
-        self.target_host.set("Tous les clients")
-        
-        ttk.Button(input_frame, text="▶ Exécuter", command=self.send_console_command, width=12).grid(row=0, column=3, padx=5)
-        
-        # Zone d'affichage
-        self.console_text = scrolledtext.ScrolledText(
-            self.console_frame, 
-            wrap=tk.WORD, 
-            height=20,
-            font=('Courier', 10),
-            bg='#1e1e1e',
-            fg='#d4d4d4'
+        self.cmd_entry = ctk.CTkEntry(
+            cmd_frame,
+            placeholder_text="Entrez une commande système...",
+            height=40,
+            font=ctk.CTkFont(size=13)
         )
-        self.console_text.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.console_text.config(state=tk.DISABLED)
+        self.cmd_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
+        self.cmd_entry.bind('<Return>', lambda e: self.send_command())
+        
+        self.target_combo = ctk.CTkComboBox(
+            cmd_frame,
+            values=["Tous les clients"],
+            height=40,
+            width=180,
+            font=ctk.CTkFont(size=13)
+        )
+        self.target_combo.grid(row=0, column=2, padx=5, pady=10)
+        self.target_combo.set("Tous les clients")
+        
+        self.send_btn = ctk.CTkButton(
+            cmd_frame,
+            text="▶ Exécuter",
+            command=self.send_command,
+            height=40,
+            width=120,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#2E7D32",
+            hover_color="#1B5E20"
+        )
+        self.send_btn.grid(row=0, column=3, padx=5, pady=10)
+        
+        self.clear_console_btn = ctk.CTkButton(
+            cmd_frame,
+            text="🗑️ Effacer",
+            command=self.clear_console,
+            height=40,
+            width=100,
+            fg_color="#E65100",
+            hover_color="#BF360C"
+        )
+        self.clear_console_btn.grid(row=0, column=4, padx=5, pady=10)
+        
+        # Console d'affichage
+        console_frame = ctk.CTkFrame(tab, corner_radius=10)
+        console_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        console_frame.grid_columnconfigure(0, weight=1)
+        console_frame.grid_rowconfigure(0, weight=1)
+        
+        self.console_text = ctk.CTkTextbox(
+            console_frame,
+            font=ctk.CTkFont(family="Courier", size=12),
+            wrap="word"
+        )
+        self.console_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # Message d'accueil
+        self.console_text.insert("1.0", "=" * 70 + "\n")
+        self.console_text.insert("end", "🔐  CONSOLE DE SUPERVISION SSH\n")
+        self.console_text.insert("end", "=" * 70 + "\n")
+        self.console_text.insert("end", "📡 Serveur: 0.0.0.0:2222\n")
+        self.console_text.insert("end", "🔌 Statut: Arrêté\n")
+        self.console_text.insert("end", "=" * 70 + "\n\n")
+        self.console_text.insert("end", "💡 Cliquez sur 'Démarrer' pour lancer le serveur\n")
+        self.console_text.insert("end", "💡 Tapez une commande et appuyez sur Entrée\n")
+        self.console_text.configure(state="disabled")
+    
+    def setup_stats_tab(self):
+        tab = self.tab_view.tab("📊 Statistiques")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
+        tab.grid_columnconfigure(2, weight=1)
+        tab.grid_rowconfigure(0, weight=0)
+        tab.grid_rowconfigure(1, weight=0)
+        tab.grid_rowconfigure(2, weight=1)
+        
+        # Cartes de statistiques
+        stat_frame1 = ctk.CTkFrame(tab, corner_radius=15)
+        stat_frame1.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        
+        ctk.CTkLabel(
+            stat_frame1,
+            text="🖥️",
+            font=ctk.CTkFont(size=30)
+        ).pack(pady=(10, 0))
+        
+        self.total_clients_stat = ctk.CTkLabel(
+            stat_frame1,
+            text="0",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="#4CAF50"
+        )
+        self.total_clients_stat.pack()
+        
+        ctk.CTkLabel(
+            stat_frame1,
+            text="Clients connectés",
+            font=ctk.CTkFont(size=12),
+            text_color="gray70"
+        ).pack(pady=(0, 10))
+        
+        stat_frame2 = ctk.CTkFrame(tab, corner_radius=15)
+        stat_frame2.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        
+        ctk.CTkLabel(
+            stat_frame2,
+            text="📊",
+            font=ctk.CTkFont(size=30)
+        ).pack(pady=(10, 0))
+        
+        self.total_sessions_stat = ctk.CTkLabel(
+            stat_frame2,
+            text="0",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="#1565C0"
+        )
+        self.total_sessions_stat.pack()
+        
+        ctk.CTkLabel(
+            stat_frame2,
+            text="Sessions totales",
+            font=ctk.CTkFont(size=12),
+            text_color="gray70"
+        ).pack(pady=(0, 10))
+        
+        stat_frame3 = ctk.CTkFrame(tab, corner_radius=15)
+        stat_frame3.grid(row=0, column=2, padx=10, pady=10, sticky="ew")
+        
+        ctk.CTkLabel(
+            stat_frame3,
+            text="📝",
+            font=ctk.CTkFont(size=30)
+        ).pack(pady=(10, 0))
+        
+        self.total_commands_stat = ctk.CTkLabel(
+            stat_frame3,
+            text="0",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="#E65100"
+        )
+        self.total_commands_stat.pack()
+        
+        ctk.CTkLabel(
+            stat_frame3,
+            text="Commandes exécutées",
+            font=ctk.CTkFont(size=12),
+            text_color="gray70"
+        ).pack(pady=(0, 10))
+        
+        # Détails
+        details_frame = ctk.CTkFrame(tab, corner_radius=15)
+        details_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
+        details_frame.grid_columnconfigure(0, weight=1)
+        details_frame.grid_columnconfigure(1, weight=1)
+        
+        self.uptime_label = ctk.CTkLabel(
+            details_frame,
+            text="⏱️ Uptime: 0s",
+            font=ctk.CTkFont(size=14)
+        )
+        self.uptime_label.grid(row=0, column=0, padx=10, pady=10)
+        
+        self.db_size_label = ctk.CTkLabel(
+            details_frame,
+            text="💾 Base de données: 0 KB",
+            font=ctk.CTkFont(size=14)
+        )
+        self.db_size_label.grid(row=0, column=1, padx=10, pady=10)
+    
+    # ===== FONCTIONS =====
     
     def start_server(self):
         if self.server.running:
             return
         
-        self.start_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="🔄 Statut: En cours...", foreground="orange")
+        self.start_btn.configure(state="disabled")
+        self.stop_btn.configure(state="normal")
+        self.status_label.configure(text="En cours...", text_color="orange")
+        self.status_indicator.configure(text="⏳")
         
         self.server_thread = threading.Thread(target=self.server.start)
         self.server_thread.daemon = True
         self.server_thread.start()
         
-        self.status_label.config(text="✅ Statut: En marche", foreground="green")
-        self.log_console("✅ Serveur démarré avec succès sur le port 2222")
-        self.update_clients_list()
+        self.status_label.configure(text="En marche", text_color="#4CAF50")
+        self.status_indicator.configure(text="✅")
+        self.log_console("✅ Serveur démarré avec succès!")
+        self.log_console(f"📡 Port: {self.server.port} | Host: {self.server.host}")
+        self.update_targets()
     
     def stop_server(self):
         if not self.server.running:
@@ -333,25 +639,61 @@ class ServerGUI:
         self.log_console("⏹ Arrêt du serveur en cours...")
         self.server.stop()
         
-        self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
-        self.status_label.config(text="⛔ Statut: Arrêté", foreground="red")
-        self.clients_label.config(text="🖥️ Clients connectés: 0")
+        self.start_btn.configure(state="normal")
+        self.stop_btn.configure(state="disabled")
+        self.status_label.configure(text="Arrêté", text_color="red")
+        self.status_indicator.configure(text="⛔")
+        self.clients_label.configure(text="0 clients")
         
         self.log_console("✅ Serveur arrêté")
     
-    def update_status(self):
-        if self.server.running:
-            nb_clients = len(self.server.clients)
-            self.clients_label.config(text=f"🖥️ Clients connectés: {nb_clients}")
-            self.update_targets()
-            self.refresh_sessions()
+    def refresh_all(self):
+        self.refresh_sessions()
+        self.refresh_history()
+        self.refresh_commands()
+        self.update_stats()
+        self.log_console("🔄 Données rafraîchies")
+    
+    def send_command(self):
+        command = self.cmd_entry.get().strip()
+        if not command:
+            return
         
-        self.root.after(3000, self.update_status)
+        if not self.server.running:
+            self.log_console("❌ Le serveur n'est pas en cours d'exécution")
+            return
+        
+        target = self.target_combo.get()
+        
+        if target == "Tous les clients":
+            if not self.server.clients:
+                self.log_console("⚠️ Aucun client connecté")
+                return
+            for client_id in self.server.clients.keys():
+                self.server.execute_remote_command(client_id, command)
+            self.log_console(f"📤 Commande '{command}' envoyée à {len(self.server.clients)} clients")
+        else:
+            self.server.execute_remote_command(target, command)
+            self.log_console(f"📤 Commande '{command}' envoyée à {target}")
+        
+        self.cmd_entry.delete(0, "end")
+    
+    def log_console(self, message):
+        self.console_text.configure(state="normal")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self.console_text.insert("end", f"[{timestamp}] {message}\n")
+        self.console_text.see("end")
+        self.console_text.configure(state="disabled")
+    
+    def clear_console(self):
+        self.console_text.configure(state="normal")
+        self.console_text.delete("1.0", "end")
+        self.console_text.insert("1.0", "=== Console effacée ===\n\n")
+        self.console_text.configure(state="disabled")
     
     def update_targets(self):
         targets = ["Tous les clients"] + list(self.server.clients.keys())
-        self.target_host['values'] = targets
+        self.target_combo.configure(values=targets)
     
     def refresh_sessions(self):
         for item in self.sessions_tree.get_children():
@@ -359,9 +701,12 @@ class ServerGUI:
         
         if self.server.db:
             sessions = self.server.db.get_session_history()
+            count = 0
             for session in sessions:
-                if session[6] == 'active':
-                    self.sessions_tree.insert("", "end", values=session)
+                if len(session) > 6 and session[6] == 'active':
+                    self.sessions_tree.insert("", "end", values=session[:6])
+                    count += 1
+            self.sessions_count.configure(text=f"Sessions actives: {count}")
     
     def refresh_history(self):
         for item in self.history_tree.get_children():
@@ -381,62 +726,52 @@ class ServerGUI:
             for cmd in commands:
                 self.commands_tree.insert("", "end", values=cmd)
     
-    def close_session(self):
-        selection = self.sessions_tree.selection()
-        if not selection:
-            messagebox.showwarning("Attention", "Veuillez sélectionner une session")
-            return
-        
-        item = self.sessions_tree.item(selection[0])
-        session_id = item['values'][0]
-        client_host = item['values'][1]
-        
-        if messagebox.askyesno("Confirmation", f"Fermer la session avec {client_host}?"):
-            for client_id, socket in self.server.clients.items():
-                if client_host in client_id:
-                    try:
-                        socket.close()
-                        self.log_console(f"🔌 Session fermée avec {client_id}")
-                        break
-                    except:
-                        pass
+    def update_stats(self):
+        if self.server.db:
+            sessions = self.server.db.get_session_history()
+            active = sum(1 for s in sessions if len(s) > 6 and s[6] == 'active')
+            commands = self.server.db.get_command_history()
+            
+            self.total_clients_stat.configure(text=str(active))
+            self.total_sessions_stat.configure(text=str(len(sessions)))
+            self.total_commands_stat.configure(text=str(len(commands)))
+            
+            # Taille DB
+            try:
+                size = os.path.getsize('ssh_sessions.db') / 1024
+                self.db_size_label.configure(text=f"💾 Base de données: {size:.1f} KB")
+            except:
+                pass
+    
+    def update_status(self):
+        if self.server.running:
+            nb_clients = len(self.server.clients)
+            self.clients_label.configure(text=f"{nb_clients} clients")
+            self.update_targets()
             self.refresh_sessions()
-    
-    def send_console_command(self):
-        command = self.cmd_entry.get().strip()
-        if not command:
-            return
+            self.update_stats()
+            
+            # Uptime
+            if hasattr(self, 'start_time'):
+                elapsed = int(time.time() - self.start_time)
+                minutes = elapsed // 60
+                seconds = elapsed % 60
+                self.uptime_label.configure(text=f"⏱️ Uptime: {minutes}m {seconds}s")
         
-        target = self.target_host.get()
-        
-        if target == "Tous les clients":
-            for client_id, socket in self.server.clients.items():
-                self.server.execute_remote_command(client_id, command)
-            self.log_console(f"📤 Commande '{command}' envoyée à tous les clients ({len(self.server.clients)} clients)")
-        else:
-            self.server.execute_remote_command(target, command)
-            self.log_console(f"📤 Commande '{command}' envoyée à {target}")
-        
-        self.cmd_entry.delete(0, tk.END)
-    
-    def log_console(self, message):
-        self.console_text.config(state=tk.NORMAL)
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        self.console_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.console_text.see(tk.END)
-        self.console_text.config(state=tk.DISABLED)
+        self.window.after(3000, self.update_status)
     
     def on_closing(self):
         if self.server.running:
             if messagebox.askokcancel("Quitter", "Le serveur est en cours d'exécution. Voulez-vous vraiment quitter ?"):
                 self.stop_server()
-                self.root.destroy()
+                self.window.destroy()
         else:
-            self.root.destroy()
+            self.window.destroy()
     
     def run(self):
-        self.root.mainloop()
+        self.window.mainloop()
 
 if __name__ == "__main__":
-    app = ServerGUI()
+    import time
+    app = ImprovedServerGUI()
     app.run()
