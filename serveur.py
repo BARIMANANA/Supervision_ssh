@@ -8,6 +8,7 @@ import json
 import datetime
 import sys
 import os
+import time
 from tkinter import messagebox, ttk
 from database import DatabaseManager
 
@@ -21,6 +22,7 @@ class SSHServer:
         self.port = port
         self.server_socket = None
         self.clients = {}
+        self.client_usernames = {}  # Stocker les usernames des clients
         self.sessions = {}
         self.running = False
         self.db = DatabaseManager()
@@ -53,11 +55,31 @@ class SSHServer:
         client_id = f"{address[0]}:{address[1]}"
         self.clients[client_id] = client_socket
         
-        session_id = self.db.log_session_start(address[0], address[1], "unknown")
+        # Récupérer le username du client
+        username = "unknown"
+        try:
+            # Attendre le message d'authentification
+            data = client_socket.recv(4096)
+            if data:
+                try:
+                    msg = json.loads(data.decode())
+                    if msg.get('type') == 'auth':
+                        username = msg.get('username', 'unknown')
+                        print(f"👤 Client {client_id} connecté en tant que: {username}")
+                except:
+                    pass
+        except:
+            pass
+        
+        # Stocker le username
+        self.client_usernames[client_id] = username
+        
+        # Enregistrer la session avec le username
+        session_id = self.db.log_session_start(address[0], address[1], username)
         self.sessions[client_id] = session_id
         
         try:
-            client_socket.send(f"Bienvenue sur le serveur SSH! (session ID: {session_id})\n".encode())
+            client_socket.send(f"Bienvenue {username}! (session ID: {session_id})\n".encode())
         except:
             pass
         
@@ -80,11 +102,14 @@ class SSHServer:
             except:
                 break
         
+        # Nettoyage
         if client_id in self.clients:
             del self.clients[client_id]
         if client_id in self.sessions:
             self.db.log_session_end(self.sessions[client_id])
             del self.sessions[client_id]
+        if client_id in self.client_usernames:
+            del self.client_usernames[client_id]
         
         client_socket.close()
         print(f"🔌 Déconnexion de {address}")
@@ -99,7 +124,8 @@ class SSHServer:
                     message['result'],
                     message.get('duration', 0)
                 )
-                print(f"📝 Commande '{message['command']}' exécutée sur {client_id}")
+                username = self.client_usernames.get(client_id, 'unknown')
+                print(f"📝 Commande '{message['command']}' exécutée par {username} sur {client_id}")
     
     def execute_remote_command(self, client_id, command):
         if client_id not in self.clients:
@@ -113,6 +139,18 @@ class SSHServer:
             return "Commande envoyée avec succès"
         except Exception as e:
             return f"Erreur: {str(e)}"
+    
+    def get_client_list(self):
+        """Retourner la liste des clients avec leurs usernames"""
+        clients = []
+        for client_id in self.clients.keys():
+            username = self.client_usernames.get(client_id, 'unknown')
+            clients.append({
+                'id': client_id,
+                'username': username,
+                'status': 'Actif'
+            })
+        return clients
     
     def stop(self):
         self.running = False
@@ -132,13 +170,12 @@ class ImprovedServerGUI:
         self.window.geometry("1300x750")
         self.window.minsize(1100, 650)
         
-        # Configuration du grid
         self.window.grid_columnconfigure(0, weight=1)
         self.window.grid_rowconfigure(0, weight=1)
         
         self.server = SSHServer()
         self.server_thread = None
-        self.command_history = []
+        self.start_time = None
         
         self.setup_ui()
         self.update_status()
@@ -146,12 +183,11 @@ class ImprovedServerGUI:
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def setup_ui(self):
-        # Frame principal
         self.main_frame = ctk.CTkFrame(self.window, corner_radius=15)
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
         self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(0, weight=0)  # Header
-        self.main_frame.grid_rowconfigure(1, weight=1)  # Content
+        self.main_frame.grid_rowconfigure(0, weight=0)
+        self.main_frame.grid_rowconfigure(1, weight=1)
         
         # ===== HEADER =====
         self.header_frame = ctk.CTkFrame(self.main_frame, corner_radius=10, fg_color="transparent")
@@ -243,7 +279,6 @@ class ImprovedServerGUI:
         )
         self.stop_btn.grid(row=0, column=4, padx=5, pady=5)
         
-        # Rafraîchir
         self.refresh_btn = ctk.CTkButton(
             self.header_frame,
             text="🔄",
@@ -262,7 +297,6 @@ class ImprovedServerGUI:
         self.content_frame.grid_columnconfigure(0, weight=1)
         self.content_frame.grid_rowconfigure(0, weight=1)
         
-        # Onglets
         self.tab_view = ctk.CTkTabview(self.content_frame, width=1200, height=500)
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
@@ -291,13 +325,11 @@ class ImprovedServerGUI:
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_rowconfigure(0, weight=1)
         
-        # Frame avec bordure
         frame = ctk.CTkFrame(tab, corner_radius=10)
         frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(0, weight=1)
         
-        # Treeview
         columns = ("ID", "Host", "Port", "Username", "Début", "Statut")
         style = ttk.Style()
         style.theme_use('clam')
@@ -319,7 +351,10 @@ class ImprovedServerGUI:
         
         for col in columns:
             self.sessions_tree.heading(col, text=col)
-            self.sessions_tree.column(col, width=150)
+            if col == "Username":
+                self.sessions_tree.column(col, width=120)
+            else:
+                self.sessions_tree.column(col, width=150)
         
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.sessions_tree.yview)
         self.sessions_tree.configure(yscrollcommand=scrollbar.set)
@@ -327,7 +362,6 @@ class ImprovedServerGUI:
         self.sessions_tree.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
         
-        # Info en bas
         info_frame = ctk.CTkFrame(tab, fg_color="transparent")
         info_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
         
@@ -338,6 +372,17 @@ class ImprovedServerGUI:
             text_color="gray70"
         )
         self.sessions_count.pack(side="left", padx=5)
+        
+        # Bouton pour afficher les usernames
+        ctk.CTkButton(
+            info_frame,
+            text="👤 Voir usernames",
+            command=self.show_usernames,
+            width=150,
+            height=30,
+            fg_color="#1565C0",
+            hover_color="#0D47A1"
+        ).pack(side="right", padx=5)
     
     def setup_history_tab(self):
         tab = self.tab_view.tab("📋 Historique")
@@ -428,7 +473,6 @@ class ImprovedServerGUI:
         tab.grid_rowconfigure(0, weight=0)
         tab.grid_rowconfigure(1, weight=1)
         
-        # Zone de commande
         cmd_frame = ctk.CTkFrame(tab, corner_radius=10)
         cmd_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         cmd_frame.grid_columnconfigure(0, weight=0)
@@ -485,7 +529,6 @@ class ImprovedServerGUI:
         )
         self.clear_console_btn.grid(row=0, column=4, padx=5, pady=10)
         
-        # Console d'affichage
         console_frame = ctk.CTkFrame(tab, corner_radius=10)
         console_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
         console_frame.grid_columnconfigure(0, weight=1)
@@ -498,12 +541,11 @@ class ImprovedServerGUI:
         )
         self.console_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
-        # Message d'accueil
         self.console_text.insert("1.0", "=" * 70 + "\n")
         self.console_text.insert("end", "🔐  CONSOLE DE SUPERVISION SSH\n")
         self.console_text.insert("end", "=" * 70 + "\n")
         self.console_text.insert("end", "📡 Serveur: 0.0.0.0:2222\n")
-        self.console_text.insert("end", "🔌 Statut: Arrêté\n")
+        self.console_text.insert("end", "👤 Support de multiples usernames\n")
         self.console_text.insert("end", "=" * 70 + "\n\n")
         self.console_text.insert("end", "💡 Cliquez sur 'Démarrer' pour lancer le serveur\n")
         self.console_text.insert("end", "💡 Tapez une commande et appuyez sur Entrée\n")
@@ -518,7 +560,6 @@ class ImprovedServerGUI:
         tab.grid_rowconfigure(1, weight=0)
         tab.grid_rowconfigure(2, weight=1)
         
-        # Cartes de statistiques
         stat_frame1 = ctk.CTkFrame(tab, corner_radius=15)
         stat_frame1.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         
@@ -591,7 +632,6 @@ class ImprovedServerGUI:
             text_color="gray70"
         ).pack(pady=(0, 10))
         
-        # Détails
         details_frame = ctk.CTkFrame(tab, corner_radius=15)
         details_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
         details_frame.grid_columnconfigure(0, weight=1)
@@ -613,6 +653,22 @@ class ImprovedServerGUI:
     
     # ===== FONCTIONS =====
     
+    def show_usernames(self):
+        """Afficher les usernames des clients connectés"""
+        if not self.server.clients:
+            messagebox.showinfo("Info", "Aucun client connecté")
+            return
+        
+        clients_info = []
+        for client_id in self.server.clients.keys():
+            username = self.server.client_usernames.get(client_id, 'unknown')
+            clients_info.append(f"{client_id} → 👤 {username}")
+        
+        messagebox.showinfo(
+            "👤 Usernames des clients",
+            "Clients connectés:\n\n" + "\n".join(clients_info)
+        )
+    
     def start_server(self):
         if self.server.running:
             return
@@ -622,6 +678,7 @@ class ImprovedServerGUI:
         self.status_label.configure(text="En cours...", text_color="orange")
         self.status_indicator.configure(text="⏳")
         
+        self.start_time = time.time()
         self.server_thread = threading.Thread(target=self.server.start)
         self.server_thread.daemon = True
         self.server_thread.start()
@@ -630,6 +687,7 @@ class ImprovedServerGUI:
         self.status_indicator.configure(text="✅")
         self.log_console("✅ Serveur démarré avec succès!")
         self.log_console(f"📡 Port: {self.server.port} | Host: {self.server.host}")
+        self.log_console("👤 Support de multiples usernames activé")
         self.update_targets()
     
     def stop_server(self):
@@ -704,7 +762,9 @@ class ImprovedServerGUI:
             count = 0
             for session in sessions:
                 if len(session) > 6 and session[6] == 'active':
-                    self.sessions_tree.insert("", "end", values=session[:6])
+                    # Récupérer le username depuis la base
+                    values = list(session[:6])
+                    self.sessions_tree.insert("", "end", values=values)
                     count += 1
             self.sessions_count.configure(text=f"Sessions actives: {count}")
     
@@ -736,7 +796,6 @@ class ImprovedServerGUI:
             self.total_sessions_stat.configure(text=str(len(sessions)))
             self.total_commands_stat.configure(text=str(len(commands)))
             
-            # Taille DB
             try:
                 size = os.path.getsize('ssh_sessions.db') / 1024
                 self.db_size_label.configure(text=f"💾 Base de données: {size:.1f} KB")
@@ -751,8 +810,7 @@ class ImprovedServerGUI:
             self.refresh_sessions()
             self.update_stats()
             
-            # Uptime
-            if hasattr(self, 'start_time'):
+            if self.start_time:
                 elapsed = int(time.time() - self.start_time)
                 minutes = elapsed // 60
                 seconds = elapsed % 60
@@ -772,6 +830,5 @@ class ImprovedServerGUI:
         self.window.mainloop()
 
 if __name__ == "__main__":
-    import time
     app = ImprovedServerGUI()
     app.run()
